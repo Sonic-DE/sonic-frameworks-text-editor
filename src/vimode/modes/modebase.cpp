@@ -29,6 +29,10 @@
 #include <QRegularExpression>
 #include <QString>
 
+#include <cstdint>
+#include <limits>
+#include <tuple>
+
 using namespace Qt::StringLiterals;
 using namespace KateVi;
 
@@ -1174,7 +1178,7 @@ void ModeBase::addToNumber(int count, bool isCumulative)
     const auto searchLines = QStringView(searchText).split('\n'_L1);
     const int vStartColumn = doc()->toVirtualColumn(searchRange.toEditorRange().start());
 
-    static const QRegularExpression numberRegex(u"0x[0-9a-fA-F]+|\\-?\\d+"_s);
+    static const QRegularExpression numberRegex(u"0[xX][0-9a-fA-F]+|\\-?\\d+"_s);
     QList<KTextEditor::Range> matchRanges;
     for (int iLine = 0; iLine < searchLines.length(); ++iLine) {
         auto numberMatchIter = numberRegex.globalMatchView(searchLines.at(iLine));
@@ -1207,9 +1211,6 @@ void ModeBase::addToNumber(int count, bool isCumulative)
     KTextEditor::Cursor newCursorPosition = c;
     for (const auto &numberRange : std::as_const(matchRanges)) {
         const QString updatedNumberText = calculateNumberIncrement(doc()->text(numberRange), amount);
-        if (updatedNumberText.isEmpty()) {
-            continue;
-        }
         doc()->replaceText(numberRange, updatedNumberText);
 
         if (!visualOpMode) {
@@ -1229,41 +1230,71 @@ void ModeBase::addToNumber(int count, bool isCumulative)
     }
 }
 
+// Operate on a found number string, adding `amount` to the number,
+// according to the defined rules to match vim behavior
+// https://vimhelp.org/change.txt.html#CTRL-A
 QString ModeBase::calculateNumberIncrement(const QString &numberAsString, qint64 amount)
 {
     bool parsedNumberSuccessfully = false;
-    int base = numberAsString.startsWith(QLatin1String("0x")) ? 16 : 10;
-    if (base != 16 && numberAsString.startsWith(QLatin1Char('0')) && numberAsString.length() > 1) {
-        // If a non-hex number with a leading 0 can be parsed as octal, then assume
-        // it is octal.
-        numberAsString.toInt(&parsedNumberSuccessfully, 8);
+    int base = numberAsString.toLower().startsWith("0x"_L1) ? 16 : 10;
+    // Check for octal numbers: leading 0s and can be parsed as octal
+    if (base == 10 && numberAsString.startsWith('0'_L1) && numberAsString.length() > 1) {
+        std::ignore = numberAsString.toULongLong(&parsedNumberSuccessfully, 8);
         if (parsedNumberSuccessfully) {
             base = 8;
         }
     }
-    const int originalNumber = numberAsString.toInt(&parsedNumberSuccessfully, base);
 
-    if (!parsedNumberSuccessfully) {
-        return {};
+    // Keep decimal signs separate from the unsigned magnitude so crossing the
+    // signed 64-bit limits cannot overflow or change the sign unexpectedly.
+    if (base == 10) {
+        bool negative = numberAsString.startsWith('-'_L1);
+        uint64_t number = numberAsString.mid(negative ? 1 : 0).toULongLong(&parsedNumberSuccessfully, 10);
+        if (parsedNumberSuccessfully) {
+            // Use unsigned negation so even the minimum qint64 has a valid magnitude.
+            const uint64_t amountMagnitude = amount < 0 ? uint64_t(0) - static_cast<uint64_t>(amount) : static_cast<uint64_t>(amount);
+            if (negative == (amount < 0)) {
+                number += amountMagnitude;
+            } else if (number >= amountMagnitude) {
+                number -= amountMagnitude;
+            } else {
+                number = amountMagnitude - number;
+                negative = !negative;
+            }
+        } else {
+            // Clamp an unrepresentable magnitude without applying the operation.
+            number = std::numeric_limits<uint64_t>::max();
+        }
+
+        // Do not pad decimals with leading 0s or retain a negative zero.
+        QString result = QString::number(number, 10);
+        if (negative && number != 0) {
+            result.prepend('-'_L1);
+        }
+        return result;
     }
 
-    QString basePrefix;
-    if (base == 16) {
-        basePrefix = QStringLiteral("0x");
-    } else if (base == 8) {
-        basePrefix = QStringLiteral("0");
+    // Parse as unsigned integer (ensure 64bits on all platforms)
+    uint64_t number = numberAsString.toULongLong(&parsedNumberSuccessfully, base);
+    if (parsedNumberSuccessfully) {
+        number += amount;
+    } else {
+        // There is an overflow: set the maximum value
+        number = std::numeric_limits<uint64_t>::max();
     }
 
-    const int withoutBaseLength = numberAsString.length() - basePrefix.length();
+    // Return the formatted and padded number according to the rules
+    // Keep the original upper or lower-cased base prefix
+    const int basePrefixLength = (base == 8) ? 1 : 2;
+    const auto basePrefix = numberAsString.mid(0, basePrefixLength);
 
-    const qint64 newNumber = originalNumber + amount;
+    QString paddedNumber = u"%1"_s.arg(number, numberAsString.length() - basePrefixLength, base, '0'_L1);
+    // Check for upper-cased hexadecimals
+    if (base == 16 && numberAsString != numberAsString.toLower()) {
+        paddedNumber = paddedNumber.toUpper();
+    }
 
-    // Create the new text string to be inserted. Prepend with “0x” if in base 16, and "0" if base 8.
-    // For non-decimal numbers, try to keep the length of the number the same (including leading 0's).
-    const QString newNumberPadded =
-        (base == 10) ? QStringLiteral("%1").arg(newNumber, 0, base) : QStringLiteral("%1").arg(newNumber, withoutBaseLength, base, QLatin1Char('0'));
-
-    return basePrefix + newNumberPadded;
+    return basePrefix + paddedNumber;
 }
 
 KTextEditor::Cursor ModeBase::cursorPosAtEndOfPaste(const KTextEditor::Cursor pasteLocation, const QString &pastedText, bool isBlock)
