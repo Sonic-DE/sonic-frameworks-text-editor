@@ -1036,6 +1036,37 @@ void ModesTest::NormalControlTests()
     // Regression test.
     DoTest("1w3", "l\\ctrl-a", "1w4");
 
+    // Non-decimal bases are unsigned and operation overflows wrap around 0
+    DoTest("0xffffffffffffffff", "\\ctrl-a", "0x0000000000000000");
+    DoTest("0x0", "\\ctrl-x", "0xffffffffffffffff");
+    DoTest("00", "\\ctrl-x", "01777777777777777777777");
+    DoTest("0xfffffffffffffffa", "10\\ctrl-a", "0x0000000000000004");
+    DoTest("0xfffffffffffffffa", "10\\ctrl-a6\\ctrl-x", "0xfffffffffffffffe");
+    // Decimal numbers can be parsed as signed or unsigned long
+    DoTest("0", "\\ctrl-x", "-1");
+    DoTest("18446744073709551615", "\\ctrl-a", "0");
+    // Decimal arithmetic must not overflow at the signed 64-bit boundaries.
+    DoTest("9223372036854775807", "\\ctrl-a", "9223372036854775808");
+    DoTest("9223372036854775807", "10\\ctrl-a", "9223372036854775817");
+    DoTest("-9223372036854775808", "\\ctrl-x", "-9223372036854775809");
+    DoTest("-9223372036854775808", "10\\ctrl-x", "-9223372036854775818");
+    DoTest("9223372036854775807", "\\ctrl-a\\ctrl-x", "9223372036854775807");
+    DoTest("-9223372036854775808", "\\ctrl-x\\ctrl-a", "-9223372036854775808");
+    DoTest("-1", "2\\ctrl-a", "1");
+    DoTest("1", "2\\ctrl-x", "-1");
+    DoTest("-0", "\\ctrl-a", "1");
+    DoTest("-18446744073709551615", "\\ctrl-a", "-18446744073709551614");
+    DoTest("-18446744073709551615", "\\ctrl-x", "0");
+    // Test parsing overflow: max integer and no operation applied
+    DoTest("123456789012345678901", "\\ctrl-a", "18446744073709551615");
+    DoTest("-123456789012345678901", "\\ctrl-a", "-18446744073709551615");
+    DoTest("0x123456789abcdef0f", "5\\ctrl-a", "0x0ffffffffffffffff");
+    // Hexadecimal uppercase if any character is uppercase (including prefix)
+    DoTest("0X0", "\\ctrl-x", "0XFFFFFFFFFFFFFFFF");
+    DoTest("0X0009", "\\ctrl-a", "0X000A");
+    DoTest("0x000A", "\\ctrl-a", "0x000B");
+    DoTest("0x00aB", "\\ctrl-a", "0x00AC");
+
     // Test "Ctrl-a/x" on a blank document/ blank line.
     DoTest("", "\\ctrl-a", "");
     DoTest("", "\\ctrl-x", "");
@@ -1627,6 +1658,10 @@ void ModesTest::VisualControlTests()
     DoTest("0x0\n0x0", "Vj2147483647g\\ctrl-a", "0x7fffffff\n0xfffffffe");
     DoTest("0\n0", "Vj2147483647g\\ctrl-au", "0\n0");
     DoTest("0\n0", "Vj2147483647\\ctrl-a", "2147483647\n2147483647");
+    // Preserve wide cumulative steps when operating on 64-bit input numbers.
+    DoTest("9223372036854775807\n9223372036854775807", "Vj2147483647g\\ctrl-a", "9223372039002259454\n9223372041149743101");
+    DoTest("-9223372036854775808\n-9223372036854775808", "Vj2147483647g\\ctrl-x", "-9223372039002259455\n-9223372041149743102");
+    DoTest("18446744073709551615\n18446744073709551615", "Vj2147483647g\\ctrl-a", "2147483646\n4294967293");
 
     // Ctrl+A / Ctrl+X Visual block mode
     DoTest("100 200\n100 200", "w\\ctrl-vj$\\ctrl-a", "100 201\n100 201");
