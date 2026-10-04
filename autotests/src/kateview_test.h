@@ -24,6 +24,8 @@ private Q_SLOTS:
     void testLowerCaseBlockSelection();
 
     void testEditorWidget();
+    void testEncodingMenu_data();
+    void testEncodingMenu();
     void testCoordinatesToCursor_data();
     void testCoordinatesToCursor();
     void testCursorToCoordinates();

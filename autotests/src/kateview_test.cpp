@@ -19,7 +19,10 @@
 #include <ktexteditor/message.h>
 #include <ktexteditor/movingcursor.h>
 
+#include <KActionCollection>
 #include <KLineEdit>
+#include <QActionGroup>
+#include <QMenu>
 #include <QScrollBar>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -63,6 +66,58 @@ void KateViewTest::testEditorWidget()
     QCOMPARE_NE(editorWidget1, editorWidget2);
     QCOMPARE_EQ(view1->editorWidget(), editorWidget1);
     QCOMPARE_EQ(View::fromEditorWidget(nullptr), nullptr);
+}
+
+void KateViewTest::testEncodingMenu_data()
+{
+    QTest::addColumn<QString>("actionName");
+    QTest::newRow("encoding") << QStringLiteral("set_encoding");
+    QTest::newRow("save-as-with-encoding") << QStringLiteral("file_save_as_with_encoding");
+}
+
+void KateViewTest::testEncodingMenu()
+{
+    QFETCH(QString, actionName);
+    KTextEditor::DocumentPrivate doc(false, false);
+    auto view = static_cast<KTextEditor::ViewPrivate *>(doc.createView(nullptr));
+    auto action = view->actionCollection()->action(actionName);
+    QVERIFY(action);
+    auto menu = action->menu();
+    QVERIFY(menu);
+    QVERIFY(menu->actions().isEmpty());
+    QVERIFY(QMetaObject::invokeMethod(menu, "aboutToShow", Qt::DirectConnection));
+
+    const auto menuCount = menu->findChildren<QMenu *>().size();
+    const auto actionCount = menu->findChildren<QAction *>().size();
+    QVERIFY(menuCount > 0);
+    QVERIFY(actionCount > 0);
+    QCOMPARE(menu->findChildren<QActionGroup *>().size(), 1);
+
+    // Pick canonical encodings supported by the document, not codec aliases.
+    QStringList encodings;
+    for (auto encodingAction : menu->findChildren<QActionGroup *>().constFirst()->actions()) {
+        if (doc.setEncoding(encodingAction->text()) && doc.encoding() == encodingAction->text() && !encodings.contains(encodingAction->text())) {
+            encodings.append(encodingAction->text());
+            if (encodings.size() == 2) {
+                break;
+            }
+        }
+    }
+    QCOMPARE(encodings.size(), 2);
+
+    for (int i = 0; i < 10; ++i) {
+        QVERIFY(doc.setEncoding(encodings.at(i % encodings.size())));
+        QVERIFY(QMetaObject::invokeMethod(menu, "aboutToShow", Qt::DirectConnection));
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
+        // Query the live objects each time, so retained old menus cannot be missed.
+        QCOMPARE(menu->findChildren<QMenu *>().size(), menuCount);
+        QCOMPARE(menu->findChildren<QAction *>().size(), actionCount);
+        const auto groups = menu->findChildren<QActionGroup *>();
+        QCOMPARE(groups.size(), 1);
+        QVERIFY(groups.constFirst()->checkedAction());
+        QCOMPARE(groups.constFirst()->checkedAction()->text(), doc.encoding());
+    }
 }
 
 void KateViewTest::testCoordinatesToCursor_data()
