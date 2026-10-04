@@ -52,6 +52,7 @@ namespace Kate
 class TextRange;
 }
 
+class QActionGroup;
 class QTimer;
 class QVBoxLayout;
 class QStackedWidget;
@@ -409,23 +410,18 @@ private:
     QString m_hoveredAnnotationGroupIdentifier;
 };
 
-class KateViewEncodingAction : public KSelectAction
+class KateViewEncodingAction : public KActionMenu
 {
 public:
-    KateViewEncodingAction(KTextEditor::DocumentPrivate *_doc, KTextEditor::ViewPrivate *_view, const QString &text, QObject *parent, bool saveAsMode = false);
-
-    bool setCurrentCodec(const QString &codec);
+    KateViewEncodingAction(KTextEditor::ViewPrivate *view, const QString &text, bool saveAsMode = false);
 
 private:
-    void init();
-    void subActionTriggered(QAction *);
-
-    KTextEditor::DocumentPrivate *doc;
-    KTextEditor::ViewPrivate *view;
-    QAction *currentSubAction;
+    KTextEditor::ViewPrivate *const m_view;
     const bool m_saveAsMode;
+    QActionGroup *const m_encodingActions;
 
 private:
+    void createEncodingActions();
     void setEncoding(const QString &e);
     void slotAboutToShow();
 };
