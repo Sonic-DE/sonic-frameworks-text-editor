@@ -5108,12 +5108,12 @@ void KTextEditor::ViewPrivate::selectionChangedForHighlights()
         }
     }
 
-    // text changed: remove all highlights + create new ones
-    // (do not call clearHighlights(), since this also resets the m_currentTextForHighlights
-    m_rangesForHighlights.clear();
+    // Discard the old search text as well, so rejected selections cannot revive
+    // stale highlights when the visible range changes.
+    clearHighlights();
 
-    // do not highlight strings with leading and trailing spaces
-    if (!text.isEmpty() && (text.at(0).isSpace() || text.at(text.length() - 1).isSpace())) {
+    // do not highlight single characters or strings with leading/trailing spaces
+    if (text.length() < 2 || text.at(0).isSpace() || text.at(text.length() - 1).isSpace()) {
         return;
     }
 
@@ -5144,22 +5144,12 @@ void KTextEditor::ViewPrivate::createHighlights()
     KTextEditor::Cursor start(visibleRange().start());
     KTextEditor::Range searchRange;
 
-    // only add word boundary if we can find the text then
-    // fixes $lala hl
-    QString pattern = QRegularExpression::escape(m_currentTextForHighlights);
-    if (m_currentTextForHighlights.contains(QRegularExpression(QLatin1String("\\b") + pattern, QRegularExpression::UseUnicodePropertiesOption))) {
-        pattern.prepend(QLatin1String("\\b"));
-    }
-
-    if (m_currentTextForHighlights.contains(QRegularExpression(pattern + QLatin1String("\\b"), QRegularExpression::UseUnicodePropertiesOption))) {
-        pattern += QLatin1String("\\b");
-    }
 
     QList<KTextEditor::Range> matches;
     do {
         searchRange.setRange(start, visibleRange().end());
 
-        matches = doc()->searchText(searchRange, pattern, KTextEditor::Regex);
+        matches = doc()->searchText(searchRange, m_currentTextForHighlights, {});
 
         if (matches.first().isValid()) {
             if (matches.first() != selectionRange()) {

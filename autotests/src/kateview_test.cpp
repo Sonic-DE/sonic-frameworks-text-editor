@@ -12,6 +12,7 @@
 #include <katebuffer.h>
 #include <kateconfig.h>
 #include <katedocument.h>
+#include <katetextrange.h>
 #include <kateview.h>
 #include <kateviewhelpers.h>
 #include <kateviewinternal.h>
@@ -118,6 +119,84 @@ void KateViewTest::testEncodingMenu()
         QVERIFY(groups.constFirst()->checkedAction());
         QCOMPARE(groups.constFirst()->checkedAction()->text(), doc.encoding());
     }
+}
+
+void KateViewTest::testSelectionOccurrenceHighlights_data()
+{
+    QTest::addColumn<Range>("rejectedSelection");
+    QTest::newRow("deselected") << Range::invalid();
+    QTest::newRow("single-character") << Range(0, 0, 0, 1);
+    QTest::newRow("leading-space") << Range(0, 3, 0, 7);
+    QTest::newRow("trailing-space") << Range(0, 0, 0, 4);
+    QTest::newRow("multiline") << Range(0, 0, 1, 3);
+}
+
+void KateViewTest::testSelectionOccurrenceHighlights()
+{
+    QFETCH(Range, rejectedSelection);
+    KTextEditor::DocumentPrivate doc(false, false);
+    QVERIFY(doc.setText(QStringLiteral("foo foo\n").repeated(100) + QStringLiteral("foo foo")));
+    auto view = static_cast<KTextEditor::ViewPrivate *>(doc.createView(nullptr));
+    view->setInputMode(View::NormalInputMode, false);
+    view->resize(400, 300);
+    view->show();
+    QCoreApplication::processEvents();
+
+    const auto highlightCount = [&]() {
+        int count = 0;
+        for (int line = 0; line < doc.lines(); ++line) {
+            for (auto range : doc.buffer().rangesForLine(line, view, true)) {
+                if (range->zDepth() == -90000.0) {
+                    ++count;
+                }
+            }
+        }
+        return count;
+    };
+
+    QVERIFY(view->setSelection(Range(0, 0, 0, 3)));
+    QCOMPARE(view->selectionText(), QStringLiteral("foo"));
+    QVERIFY(highlightCount() > 0);
+    if (rejectedSelection.isValid()) {
+        QVERIFY(view->setSelection(rejectedSelection));
+    } else {
+        QVERIFY(view->removeSelection());
+    }
+    QCOMPARE(highlightCount(), 0);
+
+    // A real viewport change must not recreate highlights for the old selection.
+    QVERIFY(view->setCursorPosition(doc.documentEnd()));
+    QCoreApplication::processEvents();
+    QVERIFY(view->visibleRange().start().line() > 0);
+    QCOMPARE(highlightCount(), 0);
+    QVERIFY(view->setCursorPosition(Cursor(0, 0)));
+    QCoreApplication::processEvents();
+    QCOMPARE(highlightCount(), 0);
+
+    // Selecting the original text again must recreate its occurrence highlights.
+    QVERIFY(view->setSelection(Range(0, 0, 0, 3)));
+    QVERIFY(highlightCount() > 0);
+}
+
+void KateViewTest::testSelectionOccurrenceLiteralMatches()
+{
+    KTextEditor::DocumentPrivate doc(false, false);
+    QVERIFY(doc.setText(QStringLiteral("a.b aXb a.bSuffix")));
+    auto view = static_cast<KTextEditor::ViewPrivate *>(doc.createView(nullptr));
+    view->setInputMode(View::NormalInputMode, false);
+    view->resize(400, 300);
+    view->show();
+    QCoreApplication::processEvents();
+    QVERIFY(view->setSelection(Range(0, 0, 0, 3)));
+
+    // Match the literal substring in a.bSuffix, not the regex-like match aXb.
+    int count = 0;
+    for (auto range : doc.buffer().rangesForLine(0, view, true)) {
+        if (range->zDepth() == -90000.0) {
+            ++count;
+        }
+    }
+    QCOMPARE(count, 1);
 }
 
 void KateViewTest::testCoordinatesToCursor_data()
