@@ -30,6 +30,9 @@ private Q_SLOTS:
     void testCoordinatesToCursor();
     void testCursorToCoordinates();
     void testSelection();
+    void testSelectionOccurrenceHighlights_data();
+    void testSelectionOccurrenceHighlights();
+    void testSelectionOccurrenceLiteralMatches();
     void testDeselectByArrowKeys_data();
     void testDeselectByArrowKeys();
     void testKillline();
