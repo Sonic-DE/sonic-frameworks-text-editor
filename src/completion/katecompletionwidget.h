@@ -19,9 +19,6 @@
 #include <ktexteditor/codecompletionmodel.h>
 #include <ktexteditor/movingrange.h>
 
-class QToolButton;
-class QPushButton;
-class QLabel;
 class QTimer;
 
 namespace KTextEditor
@@ -31,7 +28,6 @@ class ViewPrivate;
 class DocTip;
 class KateCompletionModel;
 class KateCompletionTree;
-class KateArgumentHintTree;
 class KateArgumentHintModel;
 class ArgumentHintWidget;
 
@@ -196,9 +192,6 @@ private:
 
     KTEXTEDITOR_NO_EXPORT
     void clear();
-
-    KTEXTEDITOR_NO_EXPORT
-    void completionRangeChanged(KTextEditor::CodeCompletionModel *, const KTextEditor::Range &word);
 
     KTEXTEDITOR_NO_EXPORT
     QString tailString() const;

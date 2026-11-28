@@ -43,7 +43,6 @@ class KateSpellCheckDialog;
 class KateCompletionWidget;
 class KateViewInternal;
 class KateViewBar;
-class KateTextPreview;
 class KateGotoBar;
 class KateDictionaryBar;
 class KateSpellingMenu;
@@ -776,7 +775,6 @@ public:
     bool lineNumbersOn();
     bool scrollBarMarks();
     bool scrollBarMiniMap();
-    bool scrollBarMiniMapAll();
     int dynWrapIndicators();
     bool foldingMarkersOn();
     bool forceRTLDirection() const;

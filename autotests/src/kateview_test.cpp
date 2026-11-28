@@ -19,9 +19,11 @@
 #include <ktexteditor/editor.h>
 #include <ktexteditor/message.h>
 #include <ktexteditor/movingcursor.h>
+#include <ktexteditor/movingrange.h>
 
 #include <KActionCollection>
 #include <KLineEdit>
+#include <KMessageWidget>
 #include <QActionGroup>
 #include <QMenu>
 #include <QScrollBar>
@@ -249,8 +251,13 @@ void KateViewTest::testCoordinatesToCursor()
     KTextEditor::Message *message = new KTextEditor::Message(QStringLiteral("Jo World!"), KTextEditor::Message::Information);
     doc.postMessage(message);
 
-    // wait 500ms until show animation is finished, so the message widget is visible
-    QTest::qWait(500);
+    // the fade-in effect is removed from the message once it is fully shown
+    QTRY_VERIFY([view1] {
+        const auto messages = view1->findChildren<KMessageWidget*>();
+        return std::any_of(messages.cbegin(), messages.cend(), [](const KMessageWidget* message) {
+            return message->isVisible() && !message->graphicsEffect();
+        });
+    }());
 
     QCOMPARE(coordinatesToCursor(view1->cursorToCoordinate(KTextEditor::Cursor(0, 2))), KTextEditor::Cursor(0, 2));
     QCOMPARE(coordinatesToCursor(view1->cursorToCoordinate(KTextEditor::Cursor(1, 1))), KTextEditor::Cursor(1, 1));
@@ -700,15 +707,13 @@ void KateViewTest::testDragAndDrop()
     QMouseEvent moveEvent1(QEvent::MouseMove, endDragPos + QPoint(10, 0), gEndDragPos + QPoint(10, 0), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(internalView, &moveEvent1);
 
-    QTest::qWait(100);
-
     // final tests of dragged text
-    QCOMPARE(doc.text(),
-             QStringLiteral("line0\n"
-                            "line2\n"
-                            "line1\n"
-                            "\n"
-                            "line4"));
+    QTRY_COMPARE(doc.text(),
+        QStringLiteral("line0\n"
+                       "line2\n"
+                       "line1\n"
+                       "\n"
+                       "line4"));
 
     QCOMPARE(view->cursorPosition(), KTextEditor::Cursor(3, 0));
     QCOMPARE(view->selectionRange(), Range(2, 0, 3, 0));
@@ -1092,5 +1097,27 @@ void KateViewTest::testMinimapScrollbarWidth()
     int withoutMinimap = 0;
     QTRY_VERIFY_WITH_TIMEOUT((withoutMinimap = view->getViewInternal()->m_lineScroll->width()) < withMinimap, 5000);
 }
+
+void KateViewTest::testMinimapWithRangeEndingBehindLineEnd()
+{
+    // A decoration can end far behind the line end, e.g. language servers use
+    // character 2147483647 for "until the end of the line". Drawing the minimap
+    // must not overflow the column.
+    KTextEditor::DocumentPrivate doc(false, false);
+    doc.setText(QStringLiteral("hello world\nsecond line\n"));
+    auto *view = new KTextEditor::ViewPrivate(&doc, nullptr);
+    view->config()->setValue(KateViewConfig::ShowScrollBarMiniMap, true);
+    view->show();
+
+    KTextEditor::Attribute::Ptr attr(new KTextEditor::Attribute);
+    attr->setForeground(Qt::red);
+    std::unique_ptr<KTextEditor::MovingRange> range(doc.newMovingRange({0, 0, 0, std::numeric_limits<int>::max()}));
+    range->setAttribute(attr);
+
+    auto *scrollBar = view->getViewInternal()->m_lineScroll;
+    QTRY_VERIFY_WITH_TIMEOUT(scrollBar->isVisible(), 5000);
+    QVERIFY(QMetaObject::invokeMethod(scrollBar, "updatePixmap"));
+}
+
 // kate: indent-mode cstyle; indent-width 4; replace-tabs on;
 #include "moc_kateview_test.cpp"

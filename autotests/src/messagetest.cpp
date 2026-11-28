@@ -12,6 +12,8 @@
 #include <kateview.h>
 #include <ktexteditor/message.h>
 
+#include <KMessageWidget>
+#include <QSignalSpy>
 #include <QStandardPaths>
 #include <QtTestWidgets>
 
@@ -202,19 +204,15 @@ void MessageTest::testPriority()
     QTRY_VERIFY_WITH_TIMEOUT(m2.data(), 1000);
 
     // alter text of m1 when m2 is visible, shouldn't influence m2
-    QTest::qWait(60);
+    QTRY_COMPARE(view->messageWidget()->text(), QStringLiteral("m2"));
     m1->setText(QStringLiteral("m1 changed"));
-
-    // after 70 ms, m2 is visible
-    QTest::qWait(10);
     QCOMPARE(view->messageWidget()->text(), QStringLiteral("m2"));
     QVERIFY(m2.data() != nullptr);
 
-    // after 160 ms, m2 is hidden again and m1 is visible again
-    QTest::qWait(90);
+    // m2 hides itself after 100 ms, then m1 is visible again
+    QTRY_VERIFY(m2.data() == nullptr);
     QVERIFY(view->messageWidget()->isVisible());
     QVERIFY(m1.data() != nullptr);
-    QVERIFY(m2.data() == nullptr);
 
     // finally check m1 again
     QTRY_COMPARE_WITH_TIMEOUT(view->messageWidget()->text(), QStringLiteral("m1 changed"), 1000);
@@ -256,9 +254,8 @@ void MessageTest::testCreateView()
 
     // delete message, then check after fadeout time 0f 0.5s whether message is gone
     delete m1;
-    QTest::qWait(600);
-    QVERIFY(!v1->messageWidget()->isVisible());
-    QVERIFY(!v2->messageWidget()->isVisible());
+    QTRY_VERIFY(!v1->messageWidget()->isVisible());
+    QTRY_VERIFY(!v2->messageWidget()->isVisible());
 }
 
 void MessageTest::testHideView()
@@ -284,8 +281,7 @@ void MessageTest::testHideView()
     // - the auto hide timer will continue, no matter what
     // - showing the view again after the auto hide timer is finished + animation time really hide the widget
     //
-    QTest::qWait(50);
-    QVERIFY(view->messageWidget()->isVisible());
+    QTRY_VERIFY(view->messageWidget()->isVisible());
     QCOMPARE(view->messageWidget()->text(), QStringLiteral("Message text"));
 
     // hide view
@@ -327,28 +323,31 @@ void MessageTest::testHideViewAfterUserInteraction()
     // - this should stop the autoHide timer
     // - showing the view again should restart the autoHide timer (again 2s)
     //
-    QTest::qWait(50);
-    QVERIFY(view->messageWidget()->isVisible());
+    QTRY_VERIFY(view->messageWidget()->isVisible());
     QCOMPARE(view->messageWidget()->text(), QStringLiteral("Message text"));
 
     // hide view
     view->hide();
 
-    // wait 100ms, check that message is still valid
-    QTest::qWait(100);
-    QVERIFY(message.data() != nullptr);
+    // for 100ms, check that message is still valid
+    QSignalSpy destroyedSpy(message.data(), &QObject::destroyed);
+    QVERIFY(!destroyedSpy.wait(100));
 
     //
     // show view again, and trigger user interaction through resize:
     // should retrigger the autoHide timer
     //
     view->show();
-    QTest::qWait(500);
+    // the auto-hide timer only starts once the fade-in effect is gone
+    QTRY_VERIFY([view] {
+        const auto* widget = view->messageWidget()->findChild<KMessageWidget*>();
+        return widget && widget->isVisible() && !widget->graphicsEffect();
+    }());
     view->insertText(QStringLiteral("Hello world"));
     view->setCursorPosition(Cursor(0, 5));
 
-    // wait 50ms and check that message is still displayed
-    QTest::qWait(50);
+    // for 50ms, check that message is still displayed
+    QVERIFY(!destroyedSpy.wait(50));
     QVERIFY(message.data() != nullptr);
     QVERIFY(view->messageWidget()->isVisible());
     QCOMPARE(view->messageWidget()->text(), QStringLiteral("Message text"));

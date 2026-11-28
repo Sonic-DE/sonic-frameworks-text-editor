@@ -19,14 +19,12 @@
 #include <ktexteditor/cursor.h>
 #include <ktexteditor/range.h>
 
-class QDebug;
 class KateUndoManager;
 
 namespace KTextEditor
 {
 class DocumentPrivate;
 class ViewPrivate;
-class MovingCursor;
 class MovingRange;
 class View;
 }
@@ -219,6 +217,7 @@ private:
         bool touched = false;
         // true if this field was removed e.g., because the line that contained it was removed
         bool removed = false;
+        bool isEmptyField = false;
 
         bool operator==(const TemplateField &other) const
         {

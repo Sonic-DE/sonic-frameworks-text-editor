@@ -15,10 +15,20 @@
 #include <KLazyLocalizedString>
 #include <KLocalizedString>
 
+#include <KTextEditor/Application>
+
+#include <QApplication>
+#include <QDialog>
+#include <QHashSeed>
+#include <QPointer>
+#include <QPushButton>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QTimer>
 
 #include <memory>
 #include <stdio.h>
@@ -627,18 +637,10 @@ void KateDocumentTest::testAutoReload()
 
     doc.autoReloadToggled(true);
 
-    // Some magic value. You can wait as long as you like after write to file,
-    // without to wait before it doesn't work here. It mostly fails with 500,
-    // it tend to work with 600, but is not guaranteed to work even with 800
-    QTest::qWait(1000);
-
     file.write("\nTest");
     file.flush();
 
-    // Hardcoded delay m_modOnHdTimer in DocumentPrivate
-    // + min val with which it looks working reliable here
-    QTest::qWait(1000);
-    QCOMPARE(doc.text(), QStringLiteral("Hello\nTest"));
+    QTRY_COMPARE_WITH_TIMEOUT(doc.text(), QStringLiteral("Hello\nTest"), 10000);
     // ...stay in the last line after reload!
     QCOMPARE(view->cursorPosition().line(), doc.documentEnd().line());
 
@@ -649,8 +651,7 @@ void KateDocumentTest::testAutoReload()
     file.write("\nWorld!");
     file.flush();
 
-    QTest::qWait(1000);
-    QCOMPARE(doc.text(), QStringLiteral("Hello\nTest\nWorld!"));
+    QTRY_COMPARE_WITH_TIMEOUT(doc.text(), QStringLiteral("Hello\nTest\nWorld!"), 10000);
     // ...and ensure we have not move around
     QCOMPARE(view->cursorPosition(), c);
 }
@@ -1126,4 +1127,159 @@ void KateDocumentTest::testDocumentDeduplication()
     QCOMPARE(fileDoc2.documentName(), untitled + QLatin1String(" (3)"));
     fileDoc2.setUrl(QUrl(QStringLiteral("file:///elsewhere/test.txt")));
     QCOMPARE(fileDoc2.documentName(), QStringLiteral("test.txt - elsewhere"));
+}
+
+void KateDocumentTest::testAutoReloadClearsUndoHistory()
+{
+    // An auto reload after an external change must clear the undo history of the
+    // old content, undoing it on the new content crashed, bug 523615
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("file.txt"));
+    auto writeLines = [&path](int count) {
+        QFile f(path);
+        QVERIFY(f.open(QFile::WriteOnly | QFile::Truncate));
+        for (int i = 0; i < count; ++i) {
+            f.write("line " + QByteArray::number(i) + "\n");
+        }
+    };
+    writeLines(200);
+
+    KTextEditor::DocumentPrivate doc;
+    doc.config()->setValue(KateDocumentConfig::AutoReloadOnExternalChanges, true);
+    QVERIFY(doc.openUrl(QUrl::fromLocalFile(path)));
+    QCOMPARE(doc.lines(), 201);
+
+    // edit near the end and save, the document is unmodified but has undo history
+    doc.insertText(KTextEditor::Cursor(188, 0), QStringLiteral("edit "));
+    QVERIFY(doc.documentSave());
+    QVERIFY(!doc.isModified());
+    QCOMPARE(doc.undoCount(), 1u);
+
+    // a shorter file is written externally, the document auto reloads it
+    writeLines(10);
+    QTRY_COMPARE_WITH_TIMEOUT(doc.lines(), 11, 10000);
+
+    QCOMPARE(doc.undoCount(), 0u);
+    QCOMPARE(doc.redoCount(), 0u);
+    doc.undo();
+    QCOMPARE(doc.lines(), 11);
+}
+
+// answer the next modal dialog: press the button with the given text, or cancel
+static void answerNextDialog(QObject *context, const QString &buttonText)
+{
+    auto timer = new QTimer(context);
+    timer->setInterval(10);
+    QObject::connect(timer, &QTimer::timeout, context, [timer, buttonText] {
+        auto dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog) {
+            return;
+        }
+        timer->deleteLater();
+        if (buttonText.isEmpty()) {
+            dialog->reject();
+            return;
+        }
+        const auto buttons = dialog->findChildren<QPushButton *>();
+        for (auto button : buttons) {
+            if (button->text().remove(u'&') == QString(buttonText).remove(u'&')) {
+                button->click();
+                return;
+            }
+        }
+        dialog->reject();
+    });
+    timer->start();
+}
+
+// Saving a document as a file that is open in another document would leave two documents
+// for the same file, saving one of them overwrites the other: the user has to close the
+// other document first, cancelling must not save.
+void KateDocumentTest::testSaveAsOntoFileOpenInOtherDocument()
+{
+    FakeApplication fakeApplication;
+    KTextEditor::Application application(&fakeApplication);
+    KTextEditor::EditorPrivate::self()->setApplication(&application);
+    auto restore = qScopeGuard([] {
+        KTextEditor::EditorPrivate::self()->setApplication(nullptr);
+    });
+
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    file.write("original\n");
+    file.close();
+    const QUrl url = QUrl::fromLocalFile(file.fileName());
+
+    KTextEditor::DocumentPrivate other;
+    QVERIFY(other.openUrl(url));
+    fakeApplication.openDocuments = {&other};
+
+    KTextEditor::DocumentPrivate doc;
+    doc.setText(QStringLiteral("snippet"));
+
+    // a file nobody has open: no question
+    QVERIFY(doc.closeOtherDocumentForSaveUrl(QUrl::fromLocalFile(file.fileName() + QStringLiteral(".new"))));
+
+    // the user cancels: don't save, the other document stays
+    answerNextDialog(this, QString());
+    QVERIFY(!doc.closeOtherDocumentForSaveUrl(url));
+    QVERIFY(fakeApplication.closedDocuments.isEmpty());
+
+    // the user agrees: the other document gets closed first
+    answerNextDialog(this, i18n("Close Other && Save"));
+    QVERIFY(doc.closeOtherDocumentForSaveUrl(url));
+    QCOMPARE(fakeApplication.closedDocuments, QList<KTextEditor::Document *>{&other});
+
+    // saving a document under its own url: no question
+    fakeApplication.openDocuments = {&doc};
+    QVERIFY(doc.closeOtherDocumentForSaveUrl(doc.url()));
+}
+
+void KateDocumentTest::testDeleteDocumentWithViews()
+{
+    // deleting a document must delete each of its views exactly once
+    auto doc = new KTextEditor::DocumentPrivate;
+    QList<QPointer<KTextEditor::View>> views;
+    for (int i = 0; i < 3; ++i) {
+        views.push_back(doc->createView(nullptr));
+    }
+
+    delete doc;
+
+    for (const auto &view : std::as_const(views)) {
+        QVERIFY(!view);
+    }
+}
+
+void KateDocumentTest::testMarksAfterJoiningLines()
+{
+    // a mark on every line, joining two lines merges their marks and moves all marks below up by one line
+    // marks are kept in a QHash, use a fixed seed so the result doesn't depend on the bucket layout of this run
+    QHashSeed::setDeterministicGlobalSeed();
+    const auto resetSeed = qScopeGuard([] {
+        QHashSeed::resetRandomGlobalSeed();
+    });
+    KTextEditor::DocumentPrivate doc;
+    constexpr int lineCount = 2000;
+    QStringList lines;
+    for (int i = 0; i < lineCount; ++i) {
+        lines.push_back(QStringLiteral("line %1").arg(i));
+    }
+    doc.setText(lines.join(QLatin1Char('\n')));
+    for (int i = 0; i < lineCount; ++i) {
+        doc.addMark(i, KTextEditor::Document::markType01);
+    }
+
+    for (int joined = 0; joined < lineCount - 100; ++joined) {
+        const int line = joined % (doc.lines() - 1);
+        doc.removeText(KTextEditor::Range(line, doc.lineLength(line), line + 1, 0));
+
+        const auto &marks = doc.marks();
+        QCOMPARE(marks.size(), doc.lines());
+        for (auto it = marks.cbegin(); it != marks.cend(); ++it) {
+            QCOMPARE(it.value()->line, it.key());
+            QVERIFY(it.key() >= 0 && it.key() < doc.lines());
+        }
+    }
 }

@@ -22,11 +22,13 @@
 #include <vimode/history.h>
 
 #include <QAbstractItemView>
+#include <QApplication>
 #include <QClipboard>
 #include <QCompleter>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
+#include <QSignalSpy>
 #include <QStringListModel>
 #include <QTest>
 
@@ -1583,10 +1585,11 @@ void EmulatedCommandBarTest::EmulatedCommandBarTests()
         dummyToFocus->setFocus();
         // Allow dummyToFocus to receive focus.
         QTRY_VERIFY(dummyToFocus->hasFocus());
-        // Wait ample time for the timeout to fire.  Do not use waitForEmulatedCommandBarToHide for this -
+        // For ample time, the timeout must not move focus.  Do not use waitForEmulatedCommandBarToHide for this -
         // the bar never actually hides in this instance, and I think it would take some deep changes in
         // Kate to make it do so (the KateCommandLineBar as the same issue).
-        QTest::qWait(commandResponseMessageTimeOutMS * 2);
+        QSignalSpy focusSpy(qApp, &QApplication::focusChanged);
+        QVERIFY(!focusSpy.wait(commandResponseMessageTimeOutMS * 2));
         QVERIFY(dummyToFocus->hasFocus());
         // not stable QVERIFY(emulatedCommandBar->isVisible());
         mainWindowLayout->removeWidget(dummyToFocus);

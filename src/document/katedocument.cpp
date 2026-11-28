@@ -300,9 +300,10 @@ KTextEditor::DocumentPrivate::~DocumentPrivate()
     setAutoDeleteWidget(false);
     setAutoDeletePart(false);
 
-    // clean up remaining views
-    qDeleteAll(m_views);
-    m_views.clear();
+    // clean up remaining views, each view removes itself from m_views on deletion
+    while (!m_views.isEmpty()) {
+        delete m_views.constLast();
+    }
 
     // clean up marks
     for (auto &mark : std::as_const(m_marks)) {
@@ -1481,18 +1482,19 @@ bool KTextEditor::DocumentPrivate::editUnWrapLine(int line, bool removeLine, int
         m_buffer->unwrapLine(line + 1);
     }
 
+    // merge the mark of the joined line into the mark of the next line, that one moves up to this line below
+    // do this before iterating the marks, modifying m_marks while iterating it skips or repeats marks
+    if (KTextEditor::Mark *nextLineMark = m_marks.value(line + 1)) {
+        if (KTextEditor::Mark *lineMark = m_marks.take(line)) {
+            nextLineMark->type |= lineMark->type;
+            delete lineMark;
+        }
+    }
+
     QVarLengthArray<KTextEditor::Mark *, 8> list;
     for (const auto &mark : std::as_const(m_marks)) {
         if (mark->line >= line + 1) {
             list.push_back(mark);
-        }
-
-        if (mark->line == line + 1) {
-            auto m = m_marks.take(line);
-            if (m) {
-                mark->type |= m->type;
-                delete m;
-            }
         }
     }
 
@@ -4818,7 +4820,7 @@ void KTextEditor::DocumentPrivate::slotModifiedOnDisk(KTextEditor::View * /*v*/)
 void KTextEditor::DocumentPrivate::onModOnHdSaveAs()
 {
     m_modOnHd = false;
-    const QUrl res = getSaveFileUrl(i18n("Save File"));
+    const QUrl res = getSaveAsUrl();
     if (!res.isEmpty()) {
         if (!saveAs(res)) {
             KMessageBox::error(dialogParent(), i18n("Save failed"));
@@ -5052,9 +5054,45 @@ bool KTextEditor::DocumentPrivate::documentSave()
     return save();
 }
 
-bool KTextEditor::DocumentPrivate::documentSaveAs()
+bool KTextEditor::DocumentPrivate::closeOtherDocumentForSaveUrl(const QUrl &saveUrl)
+{
+    // the application knows the other documents, none set => nothing to check
+    auto application = KTextEditor::EditorPrivate::self()->application();
+    KTextEditor::Document *other = application ? application->findUrl(saveUrl) : nullptr;
+    if (!other || other == this) {
+        return true;
+    }
+
+    // saving would leave two documents for the same file, saving one of them overwrites the other
+    const auto answer = KMessageBox::warningContinueCancel(dialogParent(),
+                                                           i18n("The file %1 is already open in another document.\n\n"
+                                                                "Saving this document there would leave two documents for the same file, "
+                                                                "saving one of them would overwrite the changes of the other one.\n\n"
+                                                                "Close the other document and save?",
+                                                                saveUrl.toDisplayString(QUrl::PreferLocalFile)),
+                                                           i18n("File Already Open"),
+                                                           KGuiItem(i18n("Close Other && Save"), QStringLiteral("document-save")),
+                                                           KStandardGuiItem::cancel());
+    if (answer != KMessageBox::Continue) {
+        return false;
+    }
+
+    // closing might ask to save the other document, the user might cancel that
+    return application->closeDocument(other);
+}
+
+QUrl KTextEditor::DocumentPrivate::getSaveAsUrl()
 {
     const QUrl saveUrl = getSaveFileUrl(i18n("Save File"));
+    if (saveUrl.isEmpty() || !closeOtherDocumentForSaveUrl(saveUrl)) {
+        return {};
+    }
+    return saveUrl;
+}
+
+bool KTextEditor::DocumentPrivate::documentSaveAs()
+{
+    const QUrl saveUrl = getSaveAsUrl();
     if (saveUrl.isEmpty()) {
         return false;
     }
@@ -5064,7 +5102,7 @@ bool KTextEditor::DocumentPrivate::documentSaveAs()
 
 bool KTextEditor::DocumentPrivate::documentSaveAsWithEncoding(const QString &encoding)
 {
-    const QUrl saveUrl = getSaveFileUrl(i18n("Save File"));
+    const QUrl saveUrl = getSaveAsUrl();
     if (saveUrl.isEmpty()) {
         return false;
     }
@@ -5631,11 +5669,19 @@ void KTextEditor::DocumentPrivate::slotDelayedHandleModOnHd()
         // we have a config option to disable this
 
         if (m_modOnHd && !isModified() && QFile::exists(url().toLocalFile())) {
-            if (config()->value(KateDocumentConfig::AutoReloadOnExternalChanges).toBool()) {
+            // our checksum is already the one of the new file, documentReload() would restore
+            // the undo history of the old content, clear it, bug 523615
+            auto reload = [this] {
                 m_modOnHd = false;
                 m_modOnHdReason = OnDiskUnmodified;
                 m_prevModOnHdReason = OnDiskUnmodified;
+                m_undoManager->clearUndo();
+                m_undoManager->clearRedo();
                 documentReload();
+            };
+
+            if (config()->value(KateDocumentConfig::AutoReloadOnExternalChanges).toBool()) {
+                reload();
             } else if (config()->value(KateDocumentConfig::AutoReloadIfStateIsInVersionControl).toBool()) {
                 // we only want to use git from PATH, cache this
                 static const QString fullGitPath = QStandardPaths::findExecutable(QStringLiteral("git"));
@@ -5649,10 +5695,7 @@ void KTextEditor::DocumentPrivate::slotDelayedHandleModOnHd()
                         if (git.waitForFinished()) {
                             if (git.exitCode() == 0) {
                                 // this hash exists still in git => just reload
-                                m_modOnHd = false;
-                                m_modOnHdReason = OnDiskUnmodified;
-                                m_prevModOnHdReason = OnDiskUnmodified;
-                                documentReload();
+                                reload();
                             }
                         }
                     }
@@ -5865,7 +5908,7 @@ void KTextEditor::DocumentPrivate::slotQueryClose_save(bool *handled, bool *abor
     *handled = true;
     *abortClosing = true;
     if (url().isEmpty()) {
-        const QUrl res = getSaveFileUrl(i18n("Save File"));
+        const QUrl res = getSaveAsUrl();
         if (res.isEmpty()) {
             *abortClosing = true;
             return;
@@ -6052,7 +6095,7 @@ bool KTextEditor::DocumentPrivate::queryClose()
         sigQueryClose(&handled, &abortClose);
         if (!handled) {
             if (url().isEmpty()) {
-                const QUrl url = getSaveFileUrl(i18n("Save File"));
+                const QUrl url = getSaveAsUrl();
                 if (url.isEmpty()) {
                     return false;
                 }
@@ -6214,6 +6257,12 @@ bool KTextEditor::DocumentPrivate::saveAs(const QUrl &url)
     // but we must check it here already to avoid messing up
     // as no signals will be send, then
     if (!url.isValid()) {
+        return false;
+    }
+
+    auto application = KTextEditor::EditorPrivate::self()->application();
+    KTextEditor::Document *other = application ? application->findUrl(url) : nullptr;
+    if (other && other != this) {
         return false;
     }
 

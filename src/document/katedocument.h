@@ -23,16 +23,8 @@
 
 class KJob;
 class KateTemplateHandler;
-namespace KTextEditor
-{
-class Plugin;
-class Attribute;
-class TemplateScript;
-}
-
 namespace KIO
 {
-class TransferJob;
 }
 
 namespace Kate
@@ -984,6 +976,22 @@ public Q_SLOTS:
 public:
     bool saveAs(const QUrl &url) override;
     QUrl getSaveFileUrl(const QString &dialogTitle, QWidget *dialogParent = nullptr);
+
+    /**
+     * Saving this document as @p saveUrl would leave two documents for the same file if
+     * another open document of the application has that url already. Ask the user to
+     * close that document first.
+     * @return true if saving as @p saveUrl can go on, false if the user cancelled or the
+     *         other document could not be closed
+     */
+    bool closeOtherDocumentForSaveUrl(const QUrl &saveUrl);
+
+    /**
+     * Ask the user for the url to save this document as, the document will get that url.
+     * Unlike getSaveFileUrl() this ensures no other document has that url, see closeOtherDocumentForSaveUrl().
+     * @return the url or an empty url if the user cancelled
+     */
+    QUrl getSaveAsUrl();
 
 private:
     // helper to handle the embedded notification for externally modified files
