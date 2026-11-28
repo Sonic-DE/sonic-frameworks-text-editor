@@ -127,7 +127,8 @@ void KeysTest::MappingTests()
     vi_input_mode_manager->keyMapper()->setMappingTimeout(mappingTimeoutMS);
 
     TestPressKey(QStringLiteral("yiwgp"));
-    QTest::qWait(2 * mappingTimeoutMS);
+    // the partial mapping times out and gp pastes after the cursor
+    QTRY_COMPARE_WITH_TIMEOUT(kate_document->text(), QStringLiteral("hhelloello"), 4 * mappingTimeoutMS);
     TestPressKey(QStringLiteral("x"));
     FinishTest("hhellollo");
 

@@ -637,18 +637,10 @@ void KateDocumentTest::testAutoReload()
 
     doc.autoReloadToggled(true);
 
-    // Some magic value. You can wait as long as you like after write to file,
-    // without to wait before it doesn't work here. It mostly fails with 500,
-    // it tend to work with 600, but is not guaranteed to work even with 800
-    QTest::qWait(1000);
-
     file.write("\nTest");
     file.flush();
 
-    // Hardcoded delay m_modOnHdTimer in DocumentPrivate
-    // + min val with which it looks working reliable here
-    QTest::qWait(1000);
-    QCOMPARE(doc.text(), QStringLiteral("Hello\nTest"));
+    QTRY_COMPARE_WITH_TIMEOUT(doc.text(), QStringLiteral("Hello\nTest"), 10000);
     // ...stay in the last line after reload!
     QCOMPARE(view->cursorPosition().line(), doc.documentEnd().line());
 
@@ -659,8 +651,7 @@ void KateDocumentTest::testAutoReload()
     file.write("\nWorld!");
     file.flush();
 
-    QTest::qWait(1000);
-    QCOMPARE(doc.text(), QStringLiteral("Hello\nTest\nWorld!"));
+    QTRY_COMPARE_WITH_TIMEOUT(doc.text(), QStringLiteral("Hello\nTest\nWorld!"), 10000);
     // ...and ensure we have not move around
     QCOMPARE(view->cursorPosition(), c);
 }
@@ -1166,7 +1157,6 @@ void KateDocumentTest::testAutoReloadClearsUndoHistory()
     QCOMPARE(doc.undoCount(), 1u);
 
     // a shorter file is written externally, the document auto reloads it
-    QTest::qWait(1100); // ensure a different modification time
     writeLines(10);
     QTRY_COMPARE_WITH_TIMEOUT(doc.lines(), 11, 10000);
 

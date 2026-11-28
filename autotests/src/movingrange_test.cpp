@@ -410,23 +410,30 @@ void MovingRangeTest::testFeedbackMouse()
     range->setFeedback(&rf);
     rf.verifyReset();
 
-    // left (nothing)
-    QTest::mouseMove(view, view->cursorToCoordinate(Cursor(0, 0)) + QPoint(0, 5));
-    QTest::qWait(200); // process mouse events. do not move mouse manually
+    // the view reports the new mouse position right before it updates the ranges under it
+    Cursor mousePosition = Cursor::invalid();
+    connect(view, &KTextEditor::View::mousePositionChanged, this, [&mousePosition](KTextEditor::View*, Cursor position) {
+        mousePosition = position;
+    });
+
+    // left (nothing); the icon border is sized when first painted and moves the text, so move until the view reports the column
+    QTRY_VERIFY([&] {
+        QTest::mouseMove(view, view->cursorToCoordinate(Cursor(0, 1)) + QPoint(0, 5));
+        return mousePosition == Cursor(0, 1);
+    }());
     QVERIFY(!rf.mouseEnteredRangeCalled());
     QVERIFY(!rf.mouseExitedRangeCalled());
 
     // middle (enter)
     rf.reset();
     QTest::mouseMove(view, view->cursorToCoordinate(Cursor(0, 3)) + QPoint(0, 5));
-    QTest::qWait(200); // process mouse events. do not move mouse manually
-    QVERIFY(rf.mouseEnteredRangeCalled());
+    QTRY_VERIFY(rf.mouseEnteredRangeCalled());
     QVERIFY(!rf.mouseExitedRangeCalled());
 
     // right (exit)
     rf.reset();
     QTest::mouseMove(view, view->cursorToCoordinate(Cursor(1, 6)) + QPoint(10, 5));
-    QTest::qWait(200); // process mouse events. do not move mouse manually
+    QTRY_VERIFY(rf.mouseExitedRangeCalled());
     QVERIFY(!rf.mouseEnteredRangeCalled());
     QVERIFY(rf.mouseExitedRangeCalled());
 }

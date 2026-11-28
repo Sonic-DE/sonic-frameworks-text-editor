@@ -23,6 +23,7 @@
 
 #include <KActionCollection>
 #include <KLineEdit>
+#include <KMessageWidget>
 #include <QActionGroup>
 #include <QMenu>
 #include <QScrollBar>
@@ -250,8 +251,13 @@ void KateViewTest::testCoordinatesToCursor()
     KTextEditor::Message *message = new KTextEditor::Message(QStringLiteral("Jo World!"), KTextEditor::Message::Information);
     doc.postMessage(message);
 
-    // wait 500ms until show animation is finished, so the message widget is visible
-    QTest::qWait(500);
+    // the fade-in effect is removed from the message once it is fully shown
+    QTRY_VERIFY([view1] {
+        const auto messages = view1->findChildren<KMessageWidget*>();
+        return std::any_of(messages.cbegin(), messages.cend(), [](const KMessageWidget* message) {
+            return message->isVisible() && !message->graphicsEffect();
+        });
+    }());
 
     QCOMPARE(coordinatesToCursor(view1->cursorToCoordinate(KTextEditor::Cursor(0, 2))), KTextEditor::Cursor(0, 2));
     QCOMPARE(coordinatesToCursor(view1->cursorToCoordinate(KTextEditor::Cursor(1, 1))), KTextEditor::Cursor(1, 1));
@@ -701,15 +707,13 @@ void KateViewTest::testDragAndDrop()
     QMouseEvent moveEvent1(QEvent::MouseMove, endDragPos + QPoint(10, 0), gEndDragPos + QPoint(10, 0), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(internalView, &moveEvent1);
 
-    QTest::qWait(100);
-
     // final tests of dragged text
-    QCOMPARE(doc.text(),
-             QStringLiteral("line0\n"
-                            "line2\n"
-                            "line1\n"
-                            "\n"
-                            "line4"));
+    QTRY_COMPARE(doc.text(),
+        QStringLiteral("line0\n"
+                       "line2\n"
+                       "line1\n"
+                       "\n"
+                       "line4"));
 
     QCOMPARE(view->cursorPosition(), KTextEditor::Cursor(3, 0));
     QCOMPARE(view->selectionRange(), Range(2, 0, 3, 0));

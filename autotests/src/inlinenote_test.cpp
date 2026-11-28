@@ -170,8 +170,7 @@ void InlineNoteTest::testInlineNote()
 
     // focus in
     QTest::mouseMove(&view, coordCol05 + QPoint(xWidth / 2, 1));
-    QTest::qWait(100);
-    QCOMPARE(noteProvider.focusInCount, 1);
+    QTRY_COMPARE(noteProvider.focusInCount, 1);
     QCOMPARE(noteProvider.focusOutCount, 0);
     QCOMPARE(noteProvider.mouseMoveCount, 0);
     QCOMPARE(noteProvider.noteActivatedCount, 0);
@@ -179,29 +178,26 @@ void InlineNoteTest::testInlineNote()
 
     // move one pixel
     QTest::mouseMove(&view, coordCol05 + QPoint(xWidth / 2 + 1, 1));
-    QTest::qWait(100);
+    QTRY_COMPARE(noteProvider.mouseMoveCount, 1);
     QCOMPARE(noteProvider.focusInCount, 1);
     QCOMPARE(noteProvider.focusOutCount, 0);
-    QCOMPARE(noteProvider.mouseMoveCount, 1);
     QCOMPARE(noteProvider.noteActivatedCount, 0);
     QVERIFY(noteProvider.lastUnderMouse);
 
     // activate
     QTest::mousePress(internalView, Qt::LeftButton, Qt::NoModifier, internalView->mapFromGlobal(view.mapToGlobal(coordCol05 + QPoint(xWidth / 2 + 1, 1))));
     QTest::mouseRelease(internalView, Qt::LeftButton, Qt::NoModifier, internalView->mapFromGlobal(view.mapToGlobal(coordCol05 + QPoint(xWidth / 2 + 1, 1))));
-    QTest::qWait(100);
+    QTRY_COMPARE(noteProvider.noteActivatedCount, 1);
     QCOMPARE(noteProvider.focusInCount, 1);
     QCOMPARE(noteProvider.focusOutCount, 0);
     QCOMPARE(noteProvider.mouseMoveCount, 1);
-    QCOMPARE(noteProvider.noteActivatedCount, 1);
     QVERIFY(noteProvider.lastUnderMouse);
 
     // focus out
     QTest::mouseMove(&view, coordCol04 + QPoint(0, 1));
     QTest::mouseMove(&view, coordCol04 + QPoint(-1, 1));
-    QTest::qWait(200);
+    QTRY_COMPARE(noteProvider.focusOutCount, 1);
     QCOMPARE(noteProvider.focusInCount, 1);
-    QCOMPARE(noteProvider.focusOutCount, 1);
     QCOMPARE(noteProvider.mouseMoveCount, 1);
     QCOMPARE(noteProvider.noteActivatedCount, 1);
     QVERIFY(noteProvider.lastUnderMouse == false);
