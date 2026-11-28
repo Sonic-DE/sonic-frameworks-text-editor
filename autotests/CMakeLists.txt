@@ -67,6 +67,9 @@ ecm_mark_as_test(kateencodingtest)
 MACRO(KTEXTEDITOR_ENCODING_TEST _encoding _testname)
   ADD_TEST (NAME encoding_${_testname}_create COMMAND kateencodingtest ${_encoding} ${CMAKE_SOURCE_DIR}/autotests/input/encoding/${_testname} ${CMAKE_CURRENT_BINARY_DIR}/${_testname} )
   ADD_TEST (NAME encoding_${_testname}_diff COMMAND ${CMAKE_COMMAND} -E compare_files ${CMAKE_SOURCE_DIR}/autotests/input/encoding/${_testname} ${CMAKE_CURRENT_BINARY_DIR}/${_testname} )
+  # the diff reads the file the create test writes, so it must run after it
+  set_tests_properties(encoding_${_testname}_create PROPERTIES FIXTURES_SETUP encoding_${_testname})
+  set_tests_properties(encoding_${_testname}_diff PROPERTIES FIXTURES_REQUIRED encoding_${_testname})
 ENDMACRO(KTEXTEDITOR_ENCODING_TEST)
 
 # add tests
